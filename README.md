@@ -3,48 +3,6 @@
 A full-stack real-time chat application built with **React**, **Node.js**, **Socket.IO**, **MongoDB**, and **JWT** authentication.
 
 ---
-
-## 📁 Folder Structure
-
-```
-chat-app/
-├── client/                   # React frontend (Vite + Tailwind)
-│   ├── src/
-│   │   ├── contexts/
-│   │   │   ├── AuthContext.jsx     # JWT auth state + API helper
-│   │   │   └── SocketContext.jsx   # Socket.IO real-time events
-│   │   ├── pages/
-│   │   │   ├── AuthPage.jsx        # Login & Register
-│   │   │   └── ChatPage.jsx        # Main chat layout
-│   │   ├── components/
-│   │   │   ├── Sidebar.jsx         # Conversations + user search
-│   │   │   ├── ChatWindow.jsx      # Messages list
-│   │   │   ├── MessageInput.jsx    # Send box + typing indicator
-│   │   │   └── Avatar.jsx          # Initials-based avatar
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.js
-│   └── tailwind.config.js
-│
-└── server/                   # Node.js backend
-    ├── models/
-    │   ├── User.js           # Mongoose User schema
-    │   └── Message.js        # Mongoose Message schema
-    ├── routes/
-    │   ├── auth.js           # POST /register, POST /login, GET /me
-    │   ├── messages.js       # GET /:userId, DELETE /:id
-    │   └── users.js          # GET /search, GET /conversations
-    ├── middleware/
-    │   └── authMiddleware.js # JWT verification
-    ├── index.js              # Express + Socket.IO server
-    ├── package.json
-    └── .env.example
-```
-
----
-
 ## 🚀 Quick Start
 
 ### Prerequisites
