@@ -13,7 +13,6 @@ export default function ChatPage() {
   const { user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [locked, setLocked] = useState(false);
-  const [convoRefresh, setConvoRefresh] = useState(0);
 
   const isGroupRoute = location.pathname.startsWith('/group/');
 
@@ -51,7 +50,6 @@ export default function ChatPage() {
           onSelectUser={handleSelectUser}
           onSelectGroup={handleSelectGroup}
           onClose={() => setSidebarOpen(false)}
-          convoRefresh={convoRefresh}
         />
       </div>
 
@@ -63,15 +61,7 @@ export default function ChatPage() {
         {isGroupRoute && groupId ? (
           <GroupChatWindow key={groupId} groupId={groupId} onOpenSidebar={() => setSidebarOpen(true)} />
         ) : userId ? (
-          <ChatWindow
-            key={userId}
-            targetUserId={userId}
-            onOpenSidebar={() => setSidebarOpen(true)}
-            onChatDeleted={() => {
-              setConvoRefresh((n) => n + 1);
-              navigate('/');
-            }}
-          />
+          <ChatWindow key={userId} targetUserId={userId} onOpenSidebar={() => setSidebarOpen(true)} />
         ) : (
           <EmptyState onOpenSidebar={() => setSidebarOpen(true)} username={user?.username} />
         )}

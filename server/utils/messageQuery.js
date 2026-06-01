@@ -51,21 +51,4 @@ function conversationMatch(myId) {
   };
 }
 
-function dmPairQuery(myId, otherId) {
-  const me = myId instanceof mongoose.Types.ObjectId ? myId : new mongoose.Types.ObjectId(myId);
-  const other = otherId instanceof mongoose.Types.ObjectId ? otherId : new mongoose.Types.ObjectId(otherId);
-
-  return {
-    $and: [
-      {
-        $or: [
-          { sender: me, receiver: other },
-          { sender: other, receiver: me },
-        ],
-      },
-      { $or: [{ group: null }, { group: { $exists: false } }] },
-    ],
-  };
-}
-
-module.exports = { dmQuery, dmPairQuery, conversationMatch };
+module.exports = { dmQuery, conversationMatch };

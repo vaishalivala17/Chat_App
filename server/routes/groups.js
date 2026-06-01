@@ -42,22 +42,6 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.get('/:groupId', async (req, res) => {
-  try {
-    const group = await Group.findById(req.params.groupId).populate(
-      'members',
-      'username phone bio status avatarUrl createdAt _id'
-    );
-    if (!group || !group.members.some((m) => m._id.toString() === req.user._id.toString())) {
-      return res.status(403).json({ message: 'Not a member of this group' });
-    }
-    res.json(group);
-  } catch (err) {
-    console.error('Get group error:', err);
-    res.status(500).json({ message: 'Failed to load group' });
-  }
-});
-
 router.get('/:groupId/messages', async (req, res) => {
   try {
     const group = await Group.findById(req.params.groupId);

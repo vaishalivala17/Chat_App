@@ -4,10 +4,9 @@ import { useSocket } from '../contexts/SocketContext';
 import Avatar from './Avatar';
 import MessageInput from './MessageInput';
 import ProfileModal from './ProfileModal';
-import { format } from 'date-fns';
-import { sortMessages, groupByDate } from '../utils/messages';
+import { format, isToday, isYesterday } from 'date-fns';
 
-export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted }) {
+export default function ChatWindow({ targetUserId, onOpenSidebar }) {
   const { user, API }                       = useAuth();
   const { onEvent, sendMessage, markRead, isOnline, connected } = useSocket();
 
@@ -20,11 +19,8 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
   const [selectMode,   setSelectMode]   = useState(false);
   const [selected,     setSelected]     = useState(new Set());
   const [chatDisappear, setChatDisappear] = useState(0);
-  const [blocked, setBlocked] = useState(false);
-  const [hasActiveStory, setHasActiveStory] = useState(false);
 
   const disappearingDefault = user?.settings?.defaultDisappearingSeconds ?? 0;
-  const myId = user?._id?.toString?.() || user?._id;
 
   const bottomRef = useRef(null);
   const listRef   = useRef(null);
@@ -33,22 +29,8 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
   useEffect(() => {
     const load = async () => {
       try {
-        const [userRes, blockRes] = await Promise.all([
-          API.get(`/users/${targetUserId}`),
-          API.get(`/users/${targetUserId}/block-status`),
-        ]);
-        setTargetUser(userRes.data);
-        setBlocked(blockRes.data.blocked);
-        if (userRes.data.isSavedContact) {
-          try {
-            const { data: st } = await API.get(`/statuses/active/${targetUserId}`);
-            setHasActiveStory(st.hasActive);
-          } catch {
-            setHasActiveStory(false);
-          }
-        } else {
-          setHasActiveStory(false);
-        }
+        const { data } = await API.get(`/users/${targetUserId}`);
+        setTargetUser(data);
       } catch {/* */}
     };
     load();
@@ -60,20 +42,16 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
 
   /* Load message history */
   useEffect(() => {
-    let cancelled = false;
     const load = async () => {
       setLoading(true);
       setMessages([]);
       try {
         const { data } = await API.get(`/messages/${targetUserId}`);
-        if (!cancelled) setMessages(data);
+        setMessages(data);
       } catch {/* */}
-      finally {
-        if (!cancelled) setLoading(false);
-      }
+      finally { setLoading(false); }
     };
     load();
-    return () => { cancelled = true; };
   }, [targetUserId, API]);
 
   /* Scroll to bottom on new messages */
@@ -96,17 +74,14 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
     });
 
     const offSent = onEvent('message:sent', (msg) => {
-      const receiverId = msg.receiver?.toString?.() || msg.receiver?._id?.toString?.() || msg.receiver;
-      if (receiverId !== targetUserId && receiverId?.toString?.() !== targetUserId) return;
-
-      setMessages((prev) => {
-        const idx = prev.findLastIndex((m) => m._optimistic);
+      // Replace optimistic message with confirmed one
+      setMessages(prev => {
+        const idx = prev.findLastIndex(m => m._optimistic);
         if (idx !== -1) {
           const next = [...prev];
           next[idx] = msg;
           return next;
         }
-        if (prev.some((m) => m._id === msg._id)) return prev;
         return [...prev, msg];
       });
     });
@@ -195,59 +170,8 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
     });
   };
 
-  const togglePin = async (msg) => {
-    const pinned = msg.pinnedBy?.some((id) => id.toString?.() === myId || id === myId);
-    try {
-      if (pinned) {
-        await API.delete(`/messages/${msg._id}/pin`);
-      } else {
-        await API.post(`/messages/${msg._id}/pin`);
-      }
-      setMessages((prev) =>
-        prev.map((m) => {
-          if (m._id !== msg._id) return m;
-          const list = m.pinnedBy || [];
-          return {
-            ...m,
-            pinnedBy: pinned
-              ? list.filter((id) => (id.toString?.() || id) !== myId)
-              : [...list, myId],
-          };
-        })
-      );
-    } catch {/* */}
-  };
-
-  const deleteChat = async () => {
-    if (!targetUserId) return;
-    if (!window.confirm(`Delete entire chat with ${targetUser?.username || 'this user'}? Starred messages are kept.`)) return;
-    try {
-      await API.delete(`/messages/conversation/${targetUserId}`);
-      setMessages([]);
-      onChatDeleted?.();
-    } catch {
-      setSendError('Failed to delete chat');
-      setTimeout(() => setSendError(''), 4000);
-    }
-  };
-
-  const toggleBlock = async () => {
-    try {
-      if (blocked) {
-        await API.delete(`/users/block/${targetUserId}`);
-        setBlocked(false);
-      } else {
-        await API.post(`/users/block/${targetUserId}`);
-        setBlocked(true);
-        onChatDeleted?.();
-      }
-    } catch {
-      setSendError(blocked ? 'Failed to unblock' : 'Failed to block');
-      setTimeout(() => setSendError(''), 4000);
-    }
-  };
-
   const toggleStar = async (msg) => {
+    const myId = user._id;
     const starred = msg.starredBy?.some((id) => id.toString() === myId || id === myId);
     try {
       if (starred) {
@@ -285,21 +209,8 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
     setSelected(new Set());
   };
 
-  const sorted = useMemo(() => sortMessages(messages, myId), [messages, myId]);
-  const grouped = useMemo(() => groupByDate(sorted), [sorted]);
-
-  const headerSubtitle = () => {
-    if (typingUsers.length > 0) {
-      return <span className="text-cyan animate-pulse">typing…</span>;
-    }
-    if (isOnline(targetUser._id, targetUser.showOnlineStatus !== false)) {
-      return 'Online';
-    }
-    if (targetUser.isSavedContact && targetUser.status) {
-      return targetUser.status;
-    }
-    return 'Offline';
-  };
+  /* Group messages by date */
+  const grouped = useMemo(() => groupByDate(messages), [messages]);
 
   return (
     <div className="flex flex-col h-full">
@@ -320,16 +231,19 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
           >
             <div className="relative">
               <Avatar username={targetUser.username} size={10} />
-              {hasActiveStory && (
-                <span className="absolute -inset-0.5 rounded-full bg-gradient-to-tr from-cyan to-green-400 -z-10" />
-              )}
               {isOnline(targetUser._id, targetUser.showOnlineStatus !== false) && (
                 <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-surface" />
               )}
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm">{targetUser.username}</p>
-              <p className="text-xs text-muted truncate">{headerSubtitle()}</p>
+              <p className="text-xs text-muted truncate">
+                {typingUsers.length > 0
+                  ? <span className="text-cyan animate-pulse">typing…</span>
+                  : isOnline(targetUser._id, targetUser.showOnlineStatus !== false)
+                    ? 'Online'
+                    : targetUser.status || 'Offline'}
+              </p>
             </div>
           </button>
         ) : (
@@ -340,23 +254,6 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
         )}
         <div className="flex gap-1 shrink-0">
           <button
-            type="button"
-            onClick={deleteChat}
-            className="p-2 rounded-lg hover:bg-card text-muted hover:text-red-400 text-xs"
-            title="Delete chat"
-          >
-            🗑
-          </button>
-          <button
-            type="button"
-            onClick={toggleBlock}
-            className={`p-2 rounded-lg hover:bg-card text-xs ${blocked ? 'text-cyan' : 'text-muted hover:text-red-400'}`}
-            title={blocked ? 'Unblock' : 'Block'}
-          >
-            {blocked ? '⊘' : '⊗'}
-          </button>
-          <button
-            type="button"
             onClick={() => { setSelectMode((v) => !v); setSelected(new Set()); }}
             className="p-2 rounded-lg hover:bg-card text-muted text-xs"
             title="Select messages"
@@ -414,8 +311,7 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
                 const isMine   = msg.sender._id === user._id || msg.sender._id?.toString() === user._id;
                 const prevMsg  = msgs[i - 1];
                 const isChained = prevMsg && prevMsg.sender._id === msg.sender._id;
-                const isStarred = msg.starredBy?.some((id) => id.toString?.() === myId || id === myId);
-                const isPinned = msg.pinnedBy?.some((id) => id.toString?.() === myId || id === myId);
+                const isStarred = msg.starredBy?.some((id) => id.toString?.() === user._id || id === user._id);
                 return (
                   <MessageBubble
                     key={msg._id}
@@ -426,10 +322,8 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
                     selectMode={selectMode}
                     selected={selected.has(msg._id)}
                     isStarred={isStarred}
-                    isPinned={isPinned}
                     onToggleSelect={() => toggleSelect(msg._id)}
                     onToggleStar={() => toggleStar(msg)}
-                    onTogglePin={() => togglePin(msg)}
                   />
                 );
               })}
@@ -485,7 +379,7 @@ export default function ChatWindow({ targetUserId, onOpenSidebar, onChatDeleted 
 
 function MessageBubble({
   message, isMine, isChained, targetUsername,
-  selectMode, selected, isStarred, isPinned, onToggleSelect, onToggleStar, onTogglePin,
+  selectMode, selected, isStarred, onToggleSelect, onToggleStar,
 }) {
   const deleted = message.deleted;
   const type = message.messageType || 'text';
@@ -532,16 +426,10 @@ function MessageBubble({
         </div>
 
         <div className={`flex items-center gap-1.5 mt-1 px-1 ${isMine ? 'flex-row-reverse' : ''}`}>
-          {isPinned && <span className="text-xs text-cyan" title="Pinned">📌</span>}
           {!selectMode && (
-            <>
-              <button type="button" onClick={(e) => { e.stopPropagation(); onTogglePin?.(); }} className="text-xs text-muted hover:text-cyan" title={isPinned ? 'Unpin' : 'Pin'}>
-                {isPinned ? '📌' : '📍'}
-              </button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); onToggleStar?.(); }} className="text-xs text-muted hover:text-yellow-400" title={isStarred ? 'Unstar' : 'Star'}>
-                {isStarred ? '★' : '☆'}
-              </button>
-            </>
+            <button type="button" onClick={(e) => { e.stopPropagation(); onToggleStar?.(); }} className="text-xs text-muted hover:text-yellow-400">
+              {isStarred ? '★' : '☆'}
+            </button>
           )}
           {message.disappearsAt && (
             <span className="text-xs text-muted" title="Disappearing">⏱</span>
@@ -580,6 +468,22 @@ function MessageSkeleton() {
       ))}
     </div>
   );
+}
+
+/* Group messages by date */
+function groupByDate(messages) {
+  const groups = new Map();
+  for (const msg of messages) {
+    const date = new Date(msg.createdAt);
+    let label;
+    if (isToday(date))     label = 'Today';
+    else if (isYesterday(date)) label = 'Yesterday';
+    else                   label = format(date, 'MMMM d, yyyy');
+
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(msg);
+  }
+  return Array.from(groups.entries()).map(([dateLabel, msgs]) => ({ dateLabel, msgs }));
 }
 
 function MenuIcon() {

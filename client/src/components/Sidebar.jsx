@@ -6,12 +6,11 @@ import ProfileModal from './ProfileModal';
 import SettingsModal from './SettingsModal';
 import StatusPanel from './StatusPanel';
 import GroupCreateModal from './GroupCreateModal';
-import StarredMessagesModal from './StarredMessagesModal';
 import { formatDistanceToNow } from 'date-fns';
 import QRCode from 'qrcode';
 import jsQR from 'jsqr';
 
-export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onSelectGroup, onClose, convoRefresh = 0 }) {
+export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onSelectGroup, onClose }) {
   const { user, logout, API } = useAuth();
   const { isOnline, onEvent, connected } = useSocket();
 
@@ -30,7 +29,6 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
   const [showSettings,  setShowSettings]  = useState(false);
   const [showStatus,    setShowStatus]    = useState(false);
   const [showGroupCreate, setShowGroupCreate] = useState(false);
-  const [showStarred,     setShowStarred]     = useState(false);
   const [groups,        setGroups]        = useState([]);
 
   const searchTimer = useRef(null);
@@ -47,7 +45,7 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
     finally { setLoadingConvos(false); }
   }, [API]);
 
-  useEffect(() => { loadConversations(); }, [loadConversations, convoRefresh]);
+  useEffect(() => { loadConversations(); }, [loadConversations]);
 
   const loadGroups = useCallback(async () => {
     try {
@@ -150,9 +148,6 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
     }
     try {
       const { data } = await API.get(`/users/by-phone/${encodeURIComponent(phone)}`);
-      try {
-        await API.post(`/users/contacts/${data._id}`);
-      } catch {/* may already be saved */}
       handleSelect(data);
       setPhoneQuery('');
     } catch (err) {
@@ -201,67 +196,45 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
     }
   }, [API, user?._id, stopScanner]);
 
-  const startScanner = () => {
+  const startScanner = async () => {
     setScanError('');
     setScanOpen(true);
-  };
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (!videoRef.current) return;
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
 
-  useEffect(() => {
-    if (!scanOpen) return;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
 
-    let cancelled = false;
-
-    const run = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-          audio: false,
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-        if (!videoRef.current) return;
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-
-        const scanFrame = async () => {
-          if (cancelled || !videoRef.current || !ctx) return;
-          const video = videoRef.current;
-          if (video.readyState >= 2) {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsQR(imageData.data, imageData.width, imageData.height);
-            if (code?.data) {
-              const consumed = await handleQrPayload(code.data);
-              if (consumed) return;
-            }
+      const scanFrame = async () => {
+        if (!videoRef.current || !ctx) return;
+        const video = videoRef.current;
+        if (video.readyState >= 2) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height);
+          if (code?.data) {
+            const consumed = await handleQrPayload(code.data);
+            if (consumed) return;
           }
-          scanTimerRef.current = requestAnimationFrame(scanFrame);
-        };
-
-        scanTimerRef.current = requestAnimationFrame(scanFrame);
-      } catch {
-        if (!cancelled) {
-          setScanError('Camera access denied or unavailable');
-          setScanOpen(false);
         }
-      }
-    };
+        scanTimerRef.current = requestAnimationFrame(scanFrame);
+      };
 
-    const t = setTimeout(run, 100);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-      stopScanner();
-    };
-  }, [scanOpen, handleQrPayload, stopScanner]);
+      scanTimerRef.current = requestAnimationFrame(scanFrame);
+    } catch {
+      setScanError('Camera access denied or unavailable');
+      setScanOpen(false);
+    }
+  };
 
   useEffect(() => () => stopScanner(), [stopScanner]);
 
@@ -300,8 +273,7 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
         </div>
       </div>
 
-      {/* Scrollable body: search, tools, groups, chats */}
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+      {/* Search */}
       <div className="p-3 shrink-0">
         <div className="relative">
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none" />
@@ -322,6 +294,7 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
         </div>
       </div>
 
+      {/* Add by phone + QR */}
       <div className="px-3 pb-3 shrink-0 border-b border-border space-y-2.5">
         <div className="flex gap-2">
           <input
@@ -331,18 +304,33 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
             onChange={(e) => setPhoneQuery(e.target.value.replace(/\s+/g, ''))}
             className="input-base !py-2.5 text-sm"
           />
-          <button type="button" onClick={handleAddByPhone} className="btn-ghost !px-3 !py-2.5 text-xs">Add</button>
+          <button onClick={handleAddByPhone} className="btn-ghost !px-3 !py-2.5 text-xs">Add</button>
         </div>
         {phoneError && <p className="text-xs text-red-400">{phoneError}</p>}
-        <div className="flex gap-2 flex-wrap">
-          <button type="button" onClick={openMyQr} className="btn-ghost flex-1 !py-2 text-xs min-w-[80px]">My QR</button>
-          <button type="button" onClick={startScanner} className="btn-ghost flex-1 !py-2 text-xs min-w-[80px]">Scan QR</button>
-          <button type="button" onClick={() => setShowStarred(true)} className="btn-ghost flex-1 !py-2 text-xs min-w-[80px]">★ Starred</button>
+        <div className="flex gap-2">
+          <button onClick={openMyQr} className="btn-ghost flex-1 !py-2 text-xs">My QR</button>
+          <button onClick={startScanner} className="btn-ghost flex-1 !py-2 text-xs">Scan QR</button>
         </div>
+        {showMyQr && (
+          <div className="bg-card border border-border rounded-xl p-3 flex flex-col items-center gap-2">
+            <img src={myQrDataUrl} alt="My chat QR code" className="w-40 h-40 rounded-lg bg-white p-2" />
+            <p className="text-xs text-muted text-center">Let others scan to start chat with you</p>
+          </div>
+        )}
+        {scanOpen && (
+          <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+            <video ref={videoRef} className="w-full rounded-lg bg-black/50" muted playsInline />
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted">Point camera at QR code</p>
+              <button onClick={stopScanner} className="text-xs text-cyan hover:underline">Close</button>
+            </div>
+            {scanError && <p className="text-xs text-red-400">{scanError}</p>}
+          </div>
+        )}
       </div>
 
       <div className="px-3 pb-2 shrink-0 flex gap-2">
-        <button type="button" onClick={() => setShowGroupCreate(true)} className="btn-ghost flex-1 !py-2 text-xs">+ New group</button>
+        <button onClick={() => setShowGroupCreate(true)} className="btn-ghost flex-1 !py-2 text-xs">+ New group</button>
       </div>
 
       {groups.length > 0 && (
@@ -351,11 +339,10 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
         </div>
       )}
       {groups.length > 0 && (
-        <div className="px-1 pb-2 shrink-0">
+        <div className="px-1 pb-2 max-h-32 overflow-y-auto shrink-0">
           {groups.map((g) => (
             <button
               key={g._id}
-              type="button"
               onClick={() => onSelectGroup?.(g)}
               className={`w-full text-left px-3 py-2 rounded-xl text-sm mx-1 ${
                 activeGroupId === g._id ? 'bg-cyan/10 border border-cyan/20 text-cyan' : 'hover:bg-card'
@@ -368,13 +355,15 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
         </div>
       )}
 
+      {/* Section label */}
       <div className="px-4 pb-2 shrink-0">
         <p className="text-xs font-semibold tracking-widest uppercase text-muted">
           {searchQuery ? 'Search Results' : 'Messages'}
         </p>
       </div>
 
-      <div className="flex-1 min-h-[120px]">
+      {/* List */}
+      <div className="flex-1 overflow-y-auto">
         {loadingConvos && !searchQuery ? (
           <SkeletonList />
         ) : displayList.length === 0 ? (
@@ -405,34 +394,6 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
           ))
         )}
       </div>
-      </div>
-
-      <p className="shrink-0 px-3 py-2 text-[10px] text-muted text-center border-t border-border">
-        Block/unblock: Settings → Blocked or chat profile
-      </p>
-
-      {showMyQr && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={() => setShowMyQr(false)}>
-          <div className="bg-surface border border-border rounded-2xl p-5 flex flex-col items-center gap-3 max-w-xs" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold text-sm">My QR code</h3>
-            <img src={myQrDataUrl} alt="My chat QR code" className="w-52 h-52 rounded-lg bg-white p-2" />
-            <p className="text-xs text-muted text-center">Let others scan to start a chat with you</p>
-            <button type="button" onClick={() => setShowMyQr(false)} className="btn-primary w-full text-sm">Close</button>
-          </div>
-        </div>
-      )}
-
-      {scanOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={stopScanner}>
-          <div className="bg-surface border border-border rounded-2xl p-4 w-full max-w-sm space-y-3" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold text-sm">Scan QR code</h3>
-            <video ref={videoRef} className="w-full rounded-lg bg-black/50 max-h-[50vh]" muted playsInline />
-            <p className="text-xs text-muted">Point camera at a chat QR code</p>
-            {scanError && <p className="text-xs text-red-400">{scanError}</p>}
-            <button type="button" onClick={stopScanner} className="btn-ghost w-full text-sm">Close</button>
-          </div>
-        </div>
-      )}
 
       {showProfile && (
         <ProfileModal userId={user?._id} isOwn onClose={() => setShowProfile(false)} />
@@ -445,7 +406,6 @@ export default function Sidebar({ activeUserId, activeGroupId, onSelectUser, onS
           onCreated={(g) => { loadGroups(); onSelectGroup?.(g); }}
         />
       )}
-      {showStarred && <StarredMessagesModal onClose={() => setShowStarred(false)} />}
     </div>
   );
 }

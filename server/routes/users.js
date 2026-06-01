@@ -67,7 +67,7 @@ router.get('/conversations', async (req, res) => {
           $or: [{ sender: myId }, { receiver: myId }],
           deleted: false,
           group: { $exists: false },
-          deletedFor: { $nin: [myId] },
+          deletedFor: { $ne: myId },
         },
       },
       { $sort: { createdAt: -1 } },
@@ -156,65 +156,6 @@ router.get('/by-phone/:phone', async (req, res) => {
   }
 });
 
-router.get('/contacts', async (req, res) => {
-  try {
-    const me = await User.findById(req.user._id).populate('savedContacts', '-password');
-    res.json(me.savedContacts.map((u) => u.toPublicJSON()));
-  } catch (err) {
-    console.error('Contacts list error:', err);
-    res.status(500).json({ message: 'Failed to load contacts' });
-  }
-});
-
-router.get('/contacts/ids', async (req, res) => {
-  try {
-    const me = await User.findById(req.user._id).select('savedContacts');
-    res.json(me.savedContacts.map((id) => id.toString()));
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to load contact ids' });
-  }
-});
-
-router.post('/contacts/:userId', async (req, res) => {
-  try {
-    const targetId = req.params.userId;
-    if (!mongoose.Types.ObjectId.isValid(targetId)) {
-      return res.status(400).json({ message: 'Invalid user ID' });
-    }
-    if (targetId === req.user._id.toString()) {
-      return res.status(400).json({ message: 'Cannot save yourself' });
-    }
-
-    const target = await User.findById(targetId).select('-password');
-    if (!target) return res.status(404).json({ message: 'User not found' });
-
-    const me = await User.findById(req.user._id);
-    const already = me.savedContacts.some((id) => id.toString() === targetId);
-    if (!already) {
-      me.savedContacts.push(targetId);
-      await me.save();
-    }
-
-    res.json({ message: 'Contact saved', user: target.toPublicJSON() });
-  } catch (err) {
-    console.error('Save contact error:', err);
-    res.status(500).json({ message: 'Failed to save contact' });
-  }
-});
-
-router.delete('/contacts/:userId', async (req, res) => {
-  try {
-    const targetId = req.params.userId;
-    const me = await User.findById(req.user._id);
-    me.savedContacts = me.savedContacts.filter((id) => id.toString() !== targetId);
-    await me.save();
-    res.json({ message: 'Contact removed' });
-  } catch (err) {
-    console.error('Remove contact error:', err);
-    res.status(500).json({ message: 'Failed to remove contact' });
-  }
-});
-
 router.get('/blocked', async (req, res) => {
   try {
     const me = await User.findById(req.user._id).populate('blockedUsers', '-password');
@@ -289,10 +230,8 @@ router.get('/:id', async (req, res) => {
       return res.status(403).json({ message: 'You have blocked this user' });
     }
 
-    const me = await User.findById(req.user._id).select('savedContacts');
     const json = target.toPublicJSON();
     json.showOnlineStatus = target.settings?.showOnlineStatus ?? true;
-    json.isSavedContact = me.savedContacts.some((id) => id.toString() === target._id.toString());
     res.json(json);
   } catch (err) {
     console.error('Get user error:', err);

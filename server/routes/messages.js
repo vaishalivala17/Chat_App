@@ -1,12 +1,11 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const Message = require('../models/Message');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/authMiddleware');
-const { dmQuery, dmPairQuery } = require('../utils/messageQuery');
+const { dmQuery } = require('../utils/messageQuery');
 
 const router = express.Router();
 
@@ -65,12 +64,9 @@ router.post('/upload', upload.single('file'), (req, res) => {
 
 router.get('/starred', async (req, res) => {
   try {
-    const myId = req.user._id;
-    const now = new Date();
     const messages = await Message.find({
-      starredBy: myId,
-      deleted: false,
-      $or: [{ disappearsAt: null }, { disappearsAt: { $exists: false } }, { disappearsAt: { $gt: now } }],
+      starredBy: req.user._id,
+      ...messageFilter(req.user._id),
     })
       .sort({ updatedAt: -1 })
       .limit(100)
@@ -79,34 +75,6 @@ router.get('/starred', async (req, res) => {
     res.json(messages);
   } catch (err) {
     res.status(500).json({ message: 'Failed to load starred messages' });
-  }
-});
-
-router.delete('/conversation/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const myId = req.user._id;
-
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: 'Invalid user ID' });
-    }
-
-    if (await isBlocked(myId, userId) || await isBlocked(userId, myId)) {
-      return res.status(403).json({ message: 'Cannot delete this conversation' });
-    }
-
-    const result = await Message.updateMany(
-      {
-        ...dmPairQuery(myId, userId),
-        starredBy: { $nin: [myId] },
-      },
-      { $addToSet: { deletedFor: myId } }
-    );
-
-    res.json({ message: 'Chat deleted', count: result.modifiedCount });
-  } catch (err) {
-    console.error('Delete conversation error:', err);
-    res.status(500).json({ message: 'Failed to delete chat' });
   }
 });
 
@@ -168,35 +136,6 @@ router.delete('/:messageId/star', async (req, res) => {
     res.json(msg);
   } catch (err) {
     res.status(500).json({ message: 'Failed to unstar message' });
-  }
-});
-
-router.post('/:messageId/pin', async (req, res) => {
-  try {
-    const msg = await Message.findById(req.params.messageId);
-    if (!msg) return res.status(404).json({ message: 'Message not found' });
-
-    const myId = req.user._id.toString();
-    if (!msg.pinnedBy.some((id) => id.toString() === myId)) {
-      msg.pinnedBy.push(req.user._id);
-    }
-    await msg.save();
-    res.json(msg);
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to pin message' });
-  }
-});
-
-router.delete('/:messageId/pin', async (req, res) => {
-  try {
-    const msg = await Message.findById(req.params.messageId);
-    if (!msg) return res.status(404).json({ message: 'Message not found' });
-
-    msg.pinnedBy = msg.pinnedBy.filter((id) => id.toString() !== req.user._id.toString());
-    await msg.save();
-    res.json(msg);
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to unpin message' });
   }
 });
 

@@ -12,8 +12,6 @@ export default function ProfileModal({ userId, isOwn, onClose, onBlocked }) {
   const [error, setError] = useState('');
   const [blocked, setBlocked] = useState(false);
   const [blockLoading, setBlockLoading] = useState(false);
-  const [savedContact, setSavedContact] = useState(false);
-  const [contactLoading, setContactLoading] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -36,7 +34,6 @@ export default function ProfileModal({ userId, isOwn, onClose, onBlocked }) {
           ]);
           setProfile(userRes.data);
           setBlocked(blockRes.data.blocked);
-          setSavedContact(Boolean(userRes.data.isSavedContact));
         }
       } catch (err) {
         setError(err.response?.data?.message || 'Failed to load profile');
@@ -59,26 +56,6 @@ export default function ProfileModal({ userId, isOwn, onClose, onBlocked }) {
       setError(err.response?.data?.message || 'Failed to save profile');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleSaveContact = async () => {
-    setContactLoading(true);
-    setError('');
-    try {
-      if (savedContact) {
-        await API.delete(`/users/contacts/${userId}`);
-        setSavedContact(false);
-        setProfile((p) => (p ? { ...p, isSavedContact: false } : p));
-      } else {
-        await API.post(`/users/contacts/${userId}`);
-        setSavedContact(true);
-        setProfile((p) => (p ? { ...p, isSavedContact: true } : p));
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to update contact');
-    } finally {
-      setContactLoading(false);
     }
   };
 
@@ -162,16 +139,8 @@ export default function ProfileModal({ userId, isOwn, onClose, onBlocked }) {
                   ) : (
                     <>
                       <p className="text-xs text-muted text-center">
-                        Save contact to see their profile status and 24h stories. Block/unblock in Settings → Blocked.
+                        Blocking stops messages from this contact. Manage all blocked users in Settings → Blocked.
                       </p>
-                      <button
-                        type="button"
-                        onClick={handleSaveContact}
-                        disabled={contactLoading}
-                        className="w-full py-3 rounded-xl text-sm font-medium border border-cyan/30 text-cyan hover:bg-cyan/10 transition-colors"
-                      >
-                        {contactLoading ? 'Please wait…' : savedContact ? 'Remove from contacts' : 'Save contact'}
-                      </button>
                       <button
                         type="button"
                         onClick={handleBlock}

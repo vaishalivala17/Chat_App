@@ -1,8 +1,10 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const multer = require('multer');
 const StatusPost = require('../models/StatusPost');
 const User = require('../models/User');
+const Message = require('../models/Message');
 const authMiddleware = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -17,24 +19,23 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
-async function getSavedContactIds(myId) {
-  const me = await User.findById(myId).select('savedContacts blockedUsers');
-  const blocked = new Set(me.blockedUsers.map((id) => id.toString()));
-  const ids = me.savedContacts
-    .map((id) => id.toString())
-    .filter((id) => !blocked.has(id));
-  ids.push(myId.toString());
-  return ids;
-}
-
 router.get('/feed', async (req, res) => {
   try {
     const myId = req.user._id;
-    const allowedIds = await getSavedContactIds(myId);
+    const me = await User.findById(myId).select('blockedUsers');
+    const blocked = new Set(me.blockedUsers.map((id) => id.toString()));
+
+    const contactIds = await Message.distinct('sender', {
+      $or: [{ sender: myId }, { receiver: myId }],
+    });
+    const contactSet = new Set(
+      contactIds.map((id) => id.toString()).filter((id) => id !== myId.toString() && !blocked.has(id))
+    );
+    contactSet.add(myId.toString());
 
     const now = new Date();
     const posts = await StatusPost.find({
-      user: { $in: allowedIds },
+      user: { $in: [...contactSet] },
       expiresAt: { $gt: now },
     })
       .populate('user', 'username _id avatarUrl')
@@ -56,19 +57,6 @@ router.get('/feed', async (req, res) => {
   } catch (err) {
     console.error('Status feed error:', err);
     res.status(500).json({ message: 'Failed to load statuses' });
-  }
-});
-
-router.get('/active/:userId', async (req, res) => {
-  try {
-    const now = new Date();
-    const count = await StatusPost.countDocuments({
-      user: req.params.userId,
-      expiresAt: { $gt: now },
-    });
-    res.json({ hasActive: count > 0 });
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to check status' });
   }
 });
 
@@ -102,35 +90,6 @@ router.post('/', upload.single('file'), async (req, res) => {
   } catch (err) {
     console.error('Create status error:', err);
     res.status(500).json({ message: 'Failed to post status' });
-  }
-});
-
-router.patch('/:statusId', upload.single('file'), async (req, res) => {
-  try {
-    const post = await StatusPost.findById(req.params.statusId);
-    if (!post) return res.status(404).json({ message: 'Status not found' });
-    if (post.user.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not allowed' });
-    }
-
-    if (req.body.text !== undefined) {
-      post.text = (req.body.text || '').trim();
-    }
-    if (req.file) {
-      post.mediaUrl = `/uploads/${req.file.filename}`;
-      post.mediaType = 'image';
-    }
-
-    if (!post.text && !post.mediaUrl) {
-      return res.status(400).json({ message: 'Status text or image required' });
-    }
-
-    await post.save();
-    const populated = await StatusPost.findById(post._id).populate('user', 'username _id');
-    res.json(populated);
-  } catch (err) {
-    console.error('Update status error:', err);
-    res.status(500).json({ message: 'Failed to update status' });
   }
 });
 
